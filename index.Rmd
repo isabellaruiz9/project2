@@ -46,93 +46,272 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Isabella Ruiz imr577
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+The purpose of this project was to investigate whether annual rates of infectious disease in Perú can at all be correlated to its colorful history of political instability. To investigate, then, a dataset containing both disease and political information for Perú was employed and is described as follows. Five datasets were utilized to create five variables featuring the amount of cases per year in Perú (1969-2019) for each of five infectious diseases- diphtheria, tetanus, yellow fever, measles, and malaria; these variables were labeled `diphtheria`, `tetanus`, `yellow_fever`, `measles`, and `malaria`. Disease data was largely sourced from the World Health Organization (WHO) and the Pan American Health Organization (PAHO), with some missing observations supplemented through old reports from the Peruvian Ministry of Health (MINSA) (1-4,5,6).There were 50 observations, or instances of recorded disease cases, for each of the five disease variables. Additionally, the year of each observation is, itself, a variable (`year`) with 53 observations spanning 1969-2021.  
+  
+As for political instability, there is, first, a simple binary variable titled `presidential_turnover`, and it indicates whether or not a new president took office in any given year (through "yes" and "no"). There are 53 observations for this variable, 12 "yes"s and 41 "no"s. While I have included articles from The Guardian and The Week as the sources for this data, this information can be found easily from multiple sources and is difficult to falsify (7-8). Similarly, the variable titled `president` gives the name of the acting Peruvian president(s) for any given year. There are 53 observations corresponding to 53 years (1969-2021); these observations can be grouped into 21 categories that reveal the amount of years each president was in control or partially in control of the nation(for example, 4 observations of "Alan García" mean that Alan García was the singular president of Perú for four years), but listing the observations for each of the 21 categories would make this already-lengthy introduction nightmarish, so I will not do so (it is calculated below anyhow). These data was sourced from the previously described news articles as well as some academic journal articles that are located in the References section of this project, but, once again, this history can be widely found and is not obscure or debated (7-8,9-10).  
+  
+Discussions of Peruvian political instability are incomplete and useless if they do not address the intense, persistent conflict between Maoist/Marxist factions and the moderate national government (approx. 1980-2000). In the aftermath of this struggle and the revolution's collapse, the Peruvian government created the Commission for Truth and Reconciliation to investigate the extent of its destruction; the variable of the dataset titled `internal_conflict_body_count` represents the annual amount of deaths and disappearances from this conflict as evaluated by the commission and published in their 2003 final report (11). Because the conflict spanned from approximately 1980-2000, there are only 21 observations for this variable. The last variable, titled `percent_NBI` represents, for each year, the percentage of Peruvians who live with at least one basic necessity unsatisfied (NBI = necesidad básica insatisfecha = unsatisfied basic need). This information was collected from datasets and reports published by the National Institute of Statistics and Information of Perú (INEI) which unfortunately do not cover much of the twentieth century, resulting in only 24 observations (12-17). Though this metric of poverty is not a direct indicator of political strife, I included it in the dataset because poverty rate is, in part, affected by politics and because I expected to see some high correlation between this metric and the rates of infectious disease per year.
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
 
-# if your dataset needs tidying, do so here
+peru_pol <- read_csv("~/project2/morepolitical.csv")
+yellowfever<- read_csv("~/project2/peruyellowfever.csv")
+tetanus <- read_csv("~/project2/perutetanus.csv")
+diphtheria <- read_csv("~/project2/perudiphtheria.csv")
+measles <- read_csv("~/project2/perumeasles.csv")
+malaria <- read_csv("~/project2/perumalaria2.csv")
 
-# any other code here
+peru_disease <- diphtheria %>% select("Period","Value") %>% rename(year="Period",diphtheria="Value") %>% full_join(measles,by=c("year"="Period")) %>% select(year,diphtheria,Value) %>% rename(measles="Value") %>% full_join(yellowfever,by=c("year"="Period")) %>% select(year,diphtheria,measles,Value) %>% rename(yellow_fever="Value") %>% full_join(tetanus,by=c("year"="Period")) %>% select(year,diphtheria,measles,yellow_fever,Value) %>% rename(tetanus="Value") %>% full_join(malaria,by=c("year"="Year")) %>% select(year,diphtheria,measles,yellow_fever,tetanus,Value) %>% rename(malaria="Value") %>% arrange(year)
+
+peru_total <- full_join(peru_disease,peru_pol,by="year") %>% mutate_if(is.character,as.factor)
+
+peru_disease %>% pivot_longer(-1,names_to="disease",values_to="count") %>% group_by(disease) %>% summarize(obs=n(),na=sum(is.na(count==T)))
+
+peru_pol%>% group_by(presidential_turnover) %>% summarize(obs=n(),na=sum(is.na(presidential_turnover)))
+peru_pol%>% group_by(president) %>% summarize(obs=n(),na=sum(is.na(president)==T))
+
+peru_pol %>% pivot_longer(c(2,4), names_to="metric",values_to="value") %>% group_by(metric) %>% select(metric,value) %>% summarize(obs=n(),na=sum(is.na(value)),actual=obs-na)
 ```
 
 ### Cluster Analysis
 
 ```{R}
 library(cluster)
-# clustering code here
+peru_total %>% select(-internal_conflict_body_count,-presidential_turnover,-percent_NBI) %>% na.omit()%>% mutate_if(is.numeric,scale)%>% mutate_if(is.numeric,as.double) %>% daisy(metric="gower") -> peru_gower
+
+sil_width <- vector()
+for (i in 2:15){
+  pam_check <- pam(peru_gower,diss=T,k=i)
+  sil_width[i] <- pam_check$silinfo$avg.width
+}
+ggplot() +geom_line(aes(x=1:15,y=sil_width)) +scale_x_continuous(name="k",breaks=1:15) +theme_light() +ggtitle("Average Silhouette Width For Several Values of k") +ylab("silhouette width")
+
+peru_gower %>% pam(diss=T,k=2) -> peru_cluster
+
+peru_cluster$silinfo$avg.width
+
+library(GGally)
+peru_total %>% select(-presidential_turnover,-percent_NBI,-internal_conflict_body_count) %>% na.omit() %>% mutate(cluster=as.factor(peru_cluster$clustering)) %>% mutate(president=str_replace_all(president,"Juan Velasco Alvarado","JVA")) %>% mutate(president=str_replace_all(president,"Francisco Morales Bermúdez","FMB")) %>% mutate(president=str_replace_all(president,"Fernando Belaúnde Terry","FBT")) %>% mutate(president=str_replace_all(president,"Alan García","AG")) %>% mutate(president=str_replace_all(president,"Alberto Fujimori","AF")) %>% mutate(president=str_replace_all(president,"Valentín Paniagua","VP")) %>% mutate(president=str_replace_all(president,"Alejandro Toledo","AT")) %>% mutate(president=str_replace_all(president,"Ollanta Humala","OH")) %>% mutate(president=str_replace_all(president,"Pedro Pablo Kuczynski","PPK")) %>% mutate(president=str_replace_all(president,"Martín Vizcarra","MV")) %>% mutate(president=str_replace_all(president,"Manuel Merino","MM")) %>% mutate(president=str_replace_all(president,"Francisco Sagasti","FS")) %>% mutate(president=str_replace_all(president,"Pedro Castillo","PC")) %>% mutate(president=str_replace_all(president," and ","/")) %>% rename("yellow fever"=yellow_fever) %>% ggpairs(cardinality_threshold=NULL,aes(color=cluster),columns=c("year","diphtheria","measles","yellow fever","tetanus","malaria","president","cluster"), proportions=c(1,1,1,1,1,1,2,1),upper = list(continuous = wrap("cor", size = 2))) +theme_light() +theme(axis.text=element_text(size=5),axis.text.x=element_text(angle=90,size=4),panel.spacing=unit(0.1,"picas"),strip.text=element_text(size=7)) +ggtitle("Pairwise Variable Comparisons by Cluster")
 ```
 
-Discussion of clustering here
-    
+The data was, here, clustered according to seven variables: year, annual diphtheria cases, annual measles cases, annual yellow fever cases, annual tetanus cases, annual malaria cases, and the president during the year of observation. As "president" is a categorical variable containing names, gower dissimilarities were calculated for the data following the scaling of numeric variables. These gower dissimilarities were first utilized to determine the most appropriate $k$ value for clustering, or the most optimum amount of clusters. After graphing the average silhouette length for clusters with differing values of $k$, $k=2$ appeared to achieve the highest silhouette length and, thus, the best clustering of data. Still, $k=2$ produced an average silhouette length of 0.4836, which indicates that the structure of this clustering is weak, though it very nearly reaches the criteria for reasonable, and may be false or contrived. 
+  
+Looking to the properties of the two clusters, the first cluster most regularly includes data from earlier years that achieved relatively high amounts of disease cases for all infectious diseases but malaria. Additionally, this cluster tends to include presidents from earlier years (from about 1969 to the mid-eighties) such as Francisco Morales Bermúdez or Fernando Belaúnde Terry. The second cluster, then mostly includes data with inverse qualities: later years, later presidents (like Alan García or Alberto Fujimori), and lower levels of infectious disease cases for all diseases but malaria, which is high. It is interesting that, though one may expect for earlier years to exhibit higher amounts of infectious disease and for infectious disease to decrease as time passes (due to improvements in medical innovations and accessibility), the amount of malaria cases per year seemed to increase as time progressed. As malaria is contracted in tropical environments, I believe (and evidence suggests) that increased malaria may be influenced by increased deforestation (18).
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+peru_total %>% select(is.numeric) %>% select(-year,-percent_NBI) %>% na.omit %>% scale %>% princomp(corr=T) -> peru_pca
+
+summary(peru_pca,loadings=T)
+
+peru_pca$sdev^2 ->eigval_peru
+round(cumsum(eigval_peru)/sum(eigval_peru),2)
+
+testing <- peru_total %>% select(-year,-percent_NBI,-president) %>% na.omit
+
+peru_pca$scores%>% as.data.frame %>% rename(PC1="Comp.1",PC2="Comp.2",PC3="Comp.3") %>% mutate(turnover=testing$presidential_turnover) -> figure_pca
+
+library(plotly)
+library(gridExtra)
+
+figure_pca %>% ggplot() +geom_point(aes(x=PC1,y=PC2,color=turnover),size=3) + theme_light() +theme(legend.position="none") -> gg1
+figure_pca %>% ggplot() +geom_point(aes(x=PC2,y=PC3,color=turnover),size=3) + theme_light() +theme(legend.position="bottom") -> gg2
+figure_pca %>% ggplot() +geom_point(aes(x=PC1,y=PC3,color=turnover),size=3) + theme_light() +theme(legend.position="none") -> gg3
+grid.arrange(gg1,gg2,gg3,ncol=3,top="Component Scores in Comparison to Each Other")
+
+plot_ly(figure_pca,x = ~PC1, y = ~PC2, z = ~PC3,type = 'scatter3d',color= ~turnover,size=I(200),alpha=1) %>% layout(title="PC1, PC2, and PC3 Scores of PCA Analysis",legend=list(title=list(text="Presidential Turnover")))
 ```
 
-Discussions of PCA here. 
+The numeric variables chosen for PCA analysis were those five pertaining to annual levels of infectious disease (`diphtheria`,`measles`,`yellow_fever`,`tetanus`, and `malaria`) and the `internal_conflict_body_count` variable that quantifies individuals who died or disappeared in the attempted communist insurgency. The proportion of variation explained by the sum of the first three components was 0.87; 0.87 is the first of the cumulative variations for components to be greater than 0.8, so the first three components should be kept. The component scores calculated for the observations used in PCA analysis are plotted above. Additionally, each of these points is color-coded according to whether or not presidential turnover occurred (the binary variable) to quickly check if the components can separate distinct groups; none of the components seemed to separate years in which presidential turnover occurred from those that it didn't.  
+  
+Looking to the component loadings, PC1 is calculated using disease data only, meaning that it categorizes each observed year on the basis of their rates of infectious diseases. More specifically, a high score on PC1 indicates high frequency of diphtheria, tetanus, and measles with a low frequency of malaria and yellow fever; a low PC1 score would be the result of the inverse. PC2 scores are calculated through rates of diphtheria, yellow fever, malaria, and deaths or disappearances via revolutionary warfare. Diphtheria, yellow fever, and malaria are each bacteria-, virus-, and parasite-borne respectively, so PC2 scores can perhaps serve to represent the interplay between disease and political violence via type of pathogen. Scoring high in PC2 indicates high rates of diphtheria and malaria (bacterial and parasitic) while yellow fever (viral) and deaths/disappearances remain low; scoring low would mean the reverse. The third component, PC3, is calculated from all variables used in the analysis, indexing infectious disease and political violence together. A high score on PC3 signifies high levels in all infectious diseases but low levels of political instability; a low score in PC3 indicates low amounts of infectious disease cases but a large amount of political violence.
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+classification_peru <- peru_total %>% select(presidential_turnover,diphtheria,measles,malaria,tetanus,yellow_fever,year,internal_conflict_body_count) %>% mutate(presidential_turnover=(presidential_turnover=="yes")) %>% na.omit()
+
+fit <- lm(presidential_turnover ~ ., data=classification_peru)
+
+score <- predict(fit)
+
+class_diag(score,truth=classification_peru$presidential_turnover,positive="TRUE")
+
+table(truth=factor(classification_peru$presidential_turnover=="TRUE",levels=c("TRUE","FALSE")),prediction=factor(score>0.5,levels=c("TRUE","FALSE"))) %>% addmargins
 ```
+Here, a linear regression model was used to predict whether or not presidential turnover occurred in a certain year based on the following numeric variables: `year`,`diphtheria`,`measles`,`tetanus`,`yellow_fever`,`malaria`, and `internal_conflict_body_count`. It's important to note that I dropped a numeric variable from the prediction model, `percent_NBI`. I did this because, when all observations with at least one "NA" in a numeric variable are dropped from the data to use in constructing the regression model, only five observations remain. I felt it somewhat pointless or uninteresting to continue classification using data so sparse, so I removed `percent_NBI` from the data as it is not a direct indicator of political instability. With this removal, the linear regression generated for classification had an AUC of 0.882, which indicates that the model is pretty good at predicting the occurrence of presidential turnover in Perú. Now for the confusion matrix, the sensitivity of the model, the proportion of actual presidential turnovers that were correctly predicted, was 0.25, and the specificity of the model, the proportion of non-turnovers that were correctly predicted, was 0.941. The average of the sensitivity and specificity, the balanced accuracy or BA, was 0.5956. Precision, for this model, is the proportion of times a turnover was predicted to occur and did actually occur, and it was calculated to be 0.5. The F1 score of this model, a balance between precision and sensitivity, was estimated to be 0.33. Finally, the accuracy of this model can be described as the proportion of correct predictions (both positive or negative) out of all observations; for this model, the accuracy was 0.81.
 
 ```{R}
-# cross-validation of linear classifier here
-```
+set.seed(1234)
+k=3
 
-Discussion here
+data <-classification_peru[sample(nrow(classification_peru)),]
+folds <- cut(seq(1:nrow(data)),breaks=k,labels=F)
+
+diags <- NULL
+for (i in 1:k){
+  train <- data[folds!=i,]
+  test <- data[folds==i,]
+  truth <- test$presidential_turnover
+  fit <- lm(presidential_turnover ~ .,data=train)
+  probs <- predict(fit,newdata=test)
+  diags <- rbind(diags,class_diag(probs,truth,positive="TRUE"))
+}
+
+summarize_all(diags,mean)
+```
+$k$-fold cross-validation (CV) was, then, performed for the linear regression classifier using $k$=3 due to the small number ($n$=21) of available observations. The AUC generated from this cross validation was a stunning 0.4778, which generally indicates that the classifier performs poorly, and it is clear that the linear classifier is severely overfitted. Though this linear regression model appeared to perform well at a first glance (AUC=0.882), the CV AUC was abysmal(0.488) and the model is likely very bad at predicting instances of presidential turnover from other numeric variables. 
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
-# non-parametric classifier code here
+
+peru_knn <- knn3(presidential_turnover ~ . ,data=classification_peru)
+knn_predict <- predict(peru_knn, newdata=classification_peru)
+class_diag(knn_predict[,2],classification_peru$presidential_turnover,positive="TRUE")
+
+table(truth=factor(classification_peru$presidential_turnover=="TRUE",levels=c("TRUE","FALSE")), prediction=factor(knn_predict[,2]>0.5,levels=c("TRUE","FALSE"))) %>% addmargins
 ```
+A non-parametric classifier, k-Nearest Neighbors (knn), was used to predict the occurrence of presidential turnover from the same numeric variables described above (all in the dataset but `percent_NBI`). The AUC for the generated model was 0.6176, meaning that this model is not very good at classification. As for the correlation matrix, the specificity was 1 and the sensitivity was 0 because the model did not make any positive predictions, or predictions that a presidential turnover would occur. The accuracy (correct predictions out of total predictions), however, was 0.8095 and the balanced accuracy (averaged sensitivity and specificity) was 0.5. The precision and F1 score could not be determined due to the sensitivity value of zero.
 
 ```{R}
-# cross-validation of np classifier here
-```
+set.seed(1234)
+k=3
 
-Discussion
+data <-classification_peru[sample(nrow(classification_peru)),]
+folds <- cut(seq(1:nrow(data)),breaks=k,labels=F)
+
+diags <- NULL
+for (i in 1:k){
+  train <- data[folds!=i,]
+  test <- data[folds==i,]
+  truth <- test$presidential_turnover
+  fit <- knn3(presidential_turnover ~ .,data=train)
+  probs <- predict(fit,newdata=test)[,2]
+  diags <- rbind(diags,class_diag(probs,truth,positive="TRUE"))
+}
+
+summarize_all(diags,mean)
+```
+Cross-validation was performed upon the knn model to generate new metrics evaluating its prediction abilities. The newly-calculated AUC was 0.594, which is astonishingly low and points to the model being bad at predictions. That being said, this CV AUC was not much lower than the AUC generated from a model trained on all observations (0.594<0.618), which means that overfitting was very minuscule. Thus, while the linear regression model performed well initially, cross-validation revealed immense overfitting and poor performance for this classifier. On the other hand, the knn model generated above was consistently bad at classification, and it demonstrated a higher AUC and CV AUC than the CV AUC of the linear model. When cross-validation was performed, the knn model performed better than the linear regression model, but they both still performed poorly.
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+regression_peru <-peru_total %>% select(percent_NBI,diphtheria,measles,malaria,yellow_fever,tetanus,year) %>% na.omit()
+
+linear_fit <- lm(percent_NBI~., data=regression_peru)
+regress_predict <- predict(linear_fit)
+
+mean((regression_peru$percent_NBI-regress_predict)^2)
 ```
+A linear regression model was fit to the data set to predict `percent_NBI` from the infectious disease variables (`diphtheria`,`measles`,`yellow fever`,`tetanus`, and `malaria`) and the `year` variable. This model was evaluated by calculating the mean squared error (MSE) of the predicted NBI percentages in comparison to actual percentages. As the MSE for the model was equivalent to 2.063, a fairly low value indicating small difference between predicted and actual NBI percentages, then the linear model can be said to work well.
 
 ```{R}
-# cross-validation of regression model here
-```
+set.seed(1234)
+k=3
 
-Discussion
+data <- regression_peru[sample(nrow(regression_peru)),]
+folds <- cut(seq(1:nrow(data)),breaks=k,labels=F)
+
+diags <- NULL
+for (i in 1:k){
+  train <- data[folds!=i,]
+  test <- data[folds==i,]
+  fit <- lm(percent_NBI~diphtheria+measles+malaria+yellow_fever+tetanus+year,data=train)
+  yhat <- predict(fit,newdata=test)
+  diags[i] <- mean((test$percent_NBI-yhat)^2)
+}
+
+mean(diags)
+```
+Still, the linear model was evaluated through $k$-fold cross-evaluation in which $k=3$ due to the small amount of observations available. The MSE value calculated from performance of cross-evaluation was 155.543. This MSE is not only stunningly high, indicating large amounts of incongruity between predicted and actual NBI percentages, but it also is radically different from the MSE derived when using all observations at once to create the model. This is evidence that there is severe overfitting with this linear regression model and that it is likely very faulty in predicting NBI percentages for certain years.
 
 ### Python 
 
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3", required = F)
+
+py_install("pandas")
+peru_python=peru_total
 ```
 
 ```{python}
-# python code here
+import numpy as np
+import pandas as pd
+
+peru_python = r.peru_python
+
+for_r=peru_python.filter(['president','diphtheria','malaria','measles','tetanus','yellow_fever']).assign(disease=peru_python['diphtheria']+peru_python['malaria']+peru_python['tetanus']+peru_python['measles']+peru_python['yellow_fever'])
 ```
 
-Discussion
+```{R}
+library(gt)
+use_python("/usr/bin/python3", required = F)
+for_r <- py$for_r
+for_r %>% group_by(president) %>% summarize(average=mean(disease,na.rm=T))%>%na.omit() %>% arrange(desc(average)) %>% gt()%>% tab_header(title="Average Infectious Disease Cases per Year by President During Year")%>% tab_style(style=list(cell_text(weight="bold"),cell_fill(color="gray95")),locations=cells_title()) %>% tab_style(style=cell_text(transform="uppercase"),location=cells_column_labels(columns=c("president","average"))) %>% tab_style(style=(cell_text(align="left")),locations=cells_body(columns="president")) %>% tab_style(style=(cell_text(align="left")),locations=cells_column_labels(columns="president")) %>% tab_style(style=cell_text(size="small"),locations=cells_body(columns=c("president","average")))
+```
+As depicted above, I brought the project dataset (`peru_total`) from R into Python and added a new column to represent the sum of all disease cases per year based on the five infectious diseases included in the data. After this transformation, I brought the Python dataset back into R, grouped the data by president, calculated the average number of infectious disease cases per year for each president of Perú, and input the results into a nice table.
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
+Frankly, the analysis above does not reveal much of a coherent link between infectious disease cases and political instability in the country of Perú. That being said, this investigation, and its results, were likely severely impeded and obscured by the lack of longitudinal political data pertaining to Perú. The data contains simple political information, information that can be considered common knowledge to some, in the `president` and `presidential_turnover` variables, but this data does not necessarily indicate a state of political instability. For example, 1992 was a very turbulent year in Peruvian politics as president Alberto Fujimori performed his "autogolpe" (self-coup) and suspended the Peruvian constitution, allowing him to reshape the government and horde executive power (19). However, when looking at the the 1992 observation for `presidential_turnover`, there is no turnover that occurs and thus no evidence of political instability, hindering the utility of this variable.  
 
+More particular political variables that were included in analysis are subject to significant scrutiny as well. The Truth and Reconciliation Commission's final report detailing the fallout of Marxist-versus-government conflict remains highly controversial to this day, with some claiming that it under-reports violence committed by the state and that it uses questionable statistical techniques (20). Better yet, when looking across multiple demographic and poverty reports generated by the Peruvian government, I noticed that the percentage of population considered to have at least one NBI can often differ wildly for the same year in different reports (12-17). And of course, as described earlier, there is a somewhat small amount of observations in the `internal_conflict_body_count` and `percent_NBI` variables that can severely impede classification or prediction analysis.  
+  
+So, while attempts at using political instability and infectious disease observations to classify or predict data demonstrated a lack of association between the two subjects, this does not mean that an association does not exist. Only if, in the future, more accurate or comprehensive political instability (or infectious disease) data were to exist for Perú could the exact underpinnings of their relationship be understood. On a final note, I'd like to share a little fun fact I learned in the performing this investigation: did you know that two-time Peruvian president Fernando Belaúnde Terry graduated from the University of Texas at Austin with a bachelor's degree in architecture (21-22)?
 
+### Works Cited
 
+1.  World Health Organization. (2021). *Diphtheria - number of reported cases* [Data Set]. World Health Organization. https://www.who.int/data/gho/data/indicators/indicator-details/GHO/diphtheria---number-of-reported-cases  
 
+2.  World Health Organization. (2021). *Yellow fever - number of reported cases* [Data Set]. World Health Organization. https://www.who.int/data/gho/data/indicators/indicator-details/GHO/yellow-fever---number-of-reported-cases  
+
+3.  World Health Organization. (2021). *Total tetanus - number of reported cases* [Data Set]. World Health Organiztion. https://www.who.int/data/gho/data/indicators/indicator-details/GHO/total-tetanus---number-of-reported-cases
+
+4.  World Health Organization. (2021). *Measles - number of reported cases* [Data Set]. World Health Organization. https://www.who.int/data/gho/data/indicators/indicator-details/GHO/measles---number-of-reported-cases
+
+5.  Pan American Health Organization & World Health Organization. (2021). *Malaria Surveillance Indicators* [Data Set]. Pan American Health Organization. https://www3.paho.org/data/index.php/en/mnu-topics/indicadores-malaria-en.html
+
+6.  Ministerio de Salud Perú: Oficina de Informatica. (1977). *Informe Estadístico: Enfermedades Transmisibles Perú: 1976*. https://cdn.www.gob.pe/uploads/document/file/417103/39960424564800618020191106-32001-mrbl52.pdf
+
+7.  Collyns, D. (202, July 28). Leftwing rural teacher Pedro Castillo sworn in as president of Peru. *The Guardian*. https://www.theguardian.com/world/2021/jul/28/leftwing-rural-teacher-pedro-castillo-sworn-in-as-president-of-peru
+
+8.  Martinic, M. S. (2020, November 17). The curious case of Peru’s persistent president-to-prison politics: Is Peru on a sanctimonious streak out to root out corruption? *The Week Magazine*. https://www.theweek.in/news/world/2020/11/17/the-curious-case-of-perus-persistent-president-to-prison-politics.html
+
+9.  Roett, R. (1985). Peru: The Message from García. *Foreign Affairs, 64(2)*, 274-286. https://heinonline.org/HOL/Page?handle=hein.journals/fora64&id=286&collection=journals&index=
+
+10.  Barr, R. R. (2010). The Persistance of Neopopulism in Peru? From Fujimori to Toledo. *Third World Quarterly, 24(6)*, 1161-1178. https://doi.org/10.1080/01436590310001630116
+
+11.  Comisión de la Verdad y Reconciliacón. (2003). *Informe Final.* https://www.cverdad.org.pe/ifinal/index.php
+
+12. Instituto Nacional de Estadística e Informática de Perú. *Población con al menos una necesidad básica insatisfecha, según indicador* [Data Set]. Instituto Nacional de Estadística e Informática de Perú. https://www.inei.gob.pe/estadisticas/indice-tematico/poverty/
+
+13.  Instituto Nacional de Estadística e Informática. (2012). *Perú: Perfil de la Pobreza por Dominios Geográficos, 2004-2011*. https://www.inei.gob.pe/media/MenuRecursivo/publicaciones_digitales/Est/Lib1047/Libro.pdf
+
+14.  Dirección Técnica de Demografía e Indicadores Sociales. (2011). *Perú: Perfil de la Pobreza por departamentos, 2001-2010*. https://www.inei.gob.pe/media/MenuRecursivo/publicaciones_digitales/Est/Lib0981/Libro.pdf
+
+15.  Instituto Nacional de Estadística e Informática de Perú. *Situación Social Del Perú IV Trimestres ( ENAHO-2000 )* [Data Set]. Instituto Nacional de Estadística e Informática de Perú. https://www.inei.gob.pe/media/MenuRecursivo/publicaciones_digitales/Est/Lib0408/Indice.htm
+
+16.  Dirección Técnica de Demografía y Estudios Sociales. (2000). *Encuesta Nacional De Hogares IV Trimestre, 1999: Principales Resultados*. https://www.inei.gob.pe/media/MenuRecursivo/publicaciones_digitales/Est/Lib0393/Libro.pdf
+
+17.  Instituto Nacional de Estadística e Informática de Perú. (1995). *DIMENSIONES Y CARACTERISTICAS DE LA POBREZA*. http://proyectos.inei.gob.pe/web/biblioineipub/bancopub/Est/Lib0067/n00.htm
+
+18.  Macdonald, A. J., & Mordecai, E. A. (2019). Amazon deforestation drives malaria transmission, and malaria burden reduces forest clearing. *Proceedings of the National Academy of Sciences of the United States of America, 116(44)*, 22212-22218. https://doi.org/10.1073/pnas.1905315116
+
+19.  Mauceri, P. (1995). State Reform, Coalitions, and the Neoliberal Autogolpe in Peru. *Latin American Research Review, 30(1)*, 7-37. http://www.jstor.org/stable/2504085
+
+20.  Rendon, S. (2019). Capturing correctly: A reanalysis of the indirect capture–recapture methods in the Peruvian Truth and Reconciliation Commission. *Research & Politics*. https://doi.org/10.1177/2053168018820375
+
+21.  Lewis, P. (2002, June 6). Fernando Belaúnde Terry, 89, Who Was Twice Peru's Chief. *The New York Times,* section B, 12. https://www.nytimes.com/2002/06/06/world/fernando-belaunde-terry-89-who-was-twice-peru-s-chief.html
+
+22.  Bridges, K. (2021, November 4). TEXAS HISTORY MINUTE: UT graduate twice elected president of Peru. *HeraldDemocrat*. https://www.heralddemocrat.com/story/news/2021/11/04/texas-history-minute-ut-graduate-twice-elected-president-peru/6284031001/
